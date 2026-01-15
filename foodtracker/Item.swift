@@ -8,11 +8,20 @@
 import Foundation
 import SwiftData
 
+enum ItemStatus: String, Codable {
+    case available
+    case used
+}
+
 @Model
 final class Item {
-    var timestamp: Date
+    var name: String
+    var status: ItemStatus
+    var createdAt: Date
     
-    init(timestamp: Date) {
-        self.timestamp = timestamp
+    init(name: String, status: ItemStatus = .available) {
+        self.name = name
+        self.status = status
+        self.createdAt = Date()
     }
 }
