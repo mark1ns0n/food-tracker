@@ -16,9 +16,9 @@ struct ContentView: View {
                     Label("Spinneys", systemImage: "list.bullet")
                 }
             
-            Text("Will be implemented later")
+            FoodTrackerTabView()
                 .tabItem {
-                    Label("Tab 2", systemImage: "star")
+                    Label("Talabat", systemImage: "figure.outdoor.cycle")
                 }
             
             Text("Will be implemented later")
@@ -205,5 +205,5 @@ struct NotificationOverlay: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [Item.self, FoodEntry.self, SavedName.self], inMemory: true)
 }
