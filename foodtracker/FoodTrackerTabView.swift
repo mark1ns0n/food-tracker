@@ -54,7 +54,7 @@ struct FoodTrackerTabView: View {
                 )
             }
             .onAppear { pruneExpiredEntries() }
-            .onChange(of: entries.count) { _ in pruneExpiredEntries() }
+            .onChange(of: entries.count) { pruneExpiredEntries() }
         }
     }
 
@@ -113,14 +113,40 @@ struct FoodEntryRow: View {
         entry.amount.formatted(.number.precision(.fractionLength(0...2)))
     }
 
+    private var formattedCreatedAt: String {
+        entry.createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var daysRemainingText: String {
+        "\(entry.daysRemaining) day\(entry.daysRemaining == 1 ? "" : "s") left"
+    }
+
     var body: some View {
-        HStack {
-            Text(entry.name)
-                .font(.body)
-                .lineLimit(1)
-            Spacer()
-            Text(formattedAmount)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(entry.name)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer()
+                Text(formattedAmount)
+                    .font(.headline)
+            }
+
+            HStack {
+                Label(formattedCreatedAt, systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(daysRemainingText)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.blue.opacity(0.15))
+                    .foregroundColor(.blue)
+                    .clipShape(Capsule())
+            }
         }
         .padding(.vertical, 6)
     }
