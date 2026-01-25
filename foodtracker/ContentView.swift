@@ -13,17 +13,17 @@ struct ContentView: View {
         TabView {
             SpinneysTabView()
                 .tabItem {
-                    Label("Spinneys", systemImage: "list.bullet")
+                    Label("Groceries", systemImage: "list.bullet")
                 }
             
             FoodTrackerTabView()
                 .tabItem {
-                    Label("Talabat", systemImage: "figure.outdoor.cycle")
+                    Label("Delivery", systemImage: "figure.outdoor.cycle")
                 }
             
-            Text("Will be implemented later")
+            DineInTabView()
                 .tabItem {
-                    Label("Tab 3", systemImage: "gear")
+                    Label("Dine-In", systemImage: "fork.knife")
                 }
         }
     }
@@ -65,12 +65,13 @@ struct SpinneysTabView: View {
                         }
                     }
                 }
-                .navigationTitle("Spinneys")
+                .navigationTitle("Groceries")
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button(action: { showAddDialog = true }) {
-                            Text("Add")
+                            Label("Add", systemImage: "plus")
                         }
+                        .buttonStyle(.borderedProminent)
                     }
                 }
                 .sheet(isPresented: $showAddDialog) {

@@ -1,45 +1,40 @@
 //
-//  FoodTrackerTabView.swift
+//  DineInTabView.swift
 //  foodtracker
 //
-//  Created by Codex on 09.02.2026.
+//  Created by Codex on 25.01.2026.
 //
 
 import SwiftUI
 import SwiftData
 
-struct FoodTrackerTabView: View {
+struct DineInTabView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \FoodEntry.createdAt, order: .reverse) private var entries: [FoodEntry]
-    @Query(sort: \SavedName.lastUsed, order: .reverse) private var savedNames: [SavedName]
     @Query(sort: \DineInEntry.createdAt, order: .reverse) private var dineInEntries: [DineInEntry]
+    @Query(sort: \SavedName.lastUsed, order: .reverse) private var savedNames: [SavedName]
+    @Query(sort: \FoodEntry.createdAt, order: .reverse) private var foodEntries: [FoodEntry]
 
     @State private var showAddDialog = false
 
-    private var activeEntries: [FoodEntry] {
-        entries.filter { !$0.isExpired }
-    }
-
-    private var totalAmount: Double {
-        activeEntries.reduce(0) { $0 + $1.amount }
+    private var activeEntries: [DineInEntry] {
+        dineInEntries.filter { !$0.isExpired }
     }
 
     var body: some View {
         NavigationStack {
             List {
                 if activeEntries.isEmpty {
-                    ContentUnavailableView("Nothing yet", systemImage: "bicycle", description: Text("Add your first entry to track amounts."))
+                    ContentUnavailableView("No Dine-In entries", systemImage: "fork.knife", description: Text("Add your first dine-in restaurant."))
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
                     ForEach(activeEntries) { entry in
-                        FoodEntryRow(entry: entry)
+                        DineInEntryRow(entry: entry)
                     }
                 }
             }
-            .navigationTitle("Delivery")
+            .navigationTitle("Dine-In")
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    TotalBadge(totalAmount: totalAmount)
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(action: { showAddDialog = true }) {
                         Label("Add", systemImage: "plus")
                     }
@@ -47,52 +42,54 @@ struct FoodTrackerTabView: View {
                 }
             }
             .sheet(isPresented: $showAddDialog) {
-                FoodEntryDialog(
+                DineInAddDialog(
                     isPresented: $showAddDialog,
                     savedNames: savedNames,
-                    onAdd: { name, amount in handleAddEntry(name: name, amount: amount) },
+                    onAdd: { name in handleAddEntry(name: name) },
                     onSaveName: { name in saveName(name) }
                 )
             }
             .onAppear { pruneExpiredEntries() }
-            .onChange(of: entries.count) { pruneExpiredEntries() }
+            .onChange(of: dineInEntries.count) { pruneExpiredEntries() }
         }
     }
 
     private func pruneExpiredEntries() {
-        let expiredEntries = entries.filter { $0.isExpired }
+        let expiredEntries = dineInEntries.filter { $0.isExpired }
         guard !expiredEntries.isEmpty else { return }
 
         expiredEntries.forEach { modelContext.delete($0) }
     }
 
-    private func handleAddEntry(name: String, amount: Double) -> String? {
+    private func handleAddEntry(name: String) -> String? {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             return "Name is required."
         }
-        guard amount > 0 else {
-            return "Amount must be greater than zero."
-        }
 
         let normalizedName = trimmedName.lowercased()
         
-        // Check if restaurant is in active DineIn list - if so, block delivery ordering
-        let activeDineInEntries = dineInEntries.filter { !$0.isExpired }
-        let isInDineIn = activeDineInEntries.contains { $0.name.lowercased() == normalizedName }
-        guard !isInDineIn else {
-            return "Cannot order delivery from this restaurant - you dined in there recently."
-        }
-        
-        let allowsMultiple = normalizedName == "talabat mart"
-        let duplicate = activeEntries.contains { $0.name.lowercased() == normalizedName }
-        guard !duplicate || allowsMultiple else {
-            return "That name is already in the list."
+        // Check if already exists in DineIn list
+        let duplicateInDineIn = activeEntries.contains { $0.name.lowercased() == normalizedName }
+        guard !duplicateInDineIn else {
+            return "That restaurant is already in the Dine-In list."
         }
 
-        let entry = FoodEntry(name: trimmedName, amount: amount)
+        // Add to DineIn
+        let entry = DineInEntry(name: trimmedName)
         modelContext.insert(entry)
         saveName(trimmedName)
+
+        // Check if restaurant exists in Delivery (FoodEntry) list
+        let activeFoodEntries = foodEntries.filter { !$0.isExpired }
+        let existsInDelivery = activeFoodEntries.contains { $0.name.lowercased() == normalizedName }
+        
+        // If not in Delivery, add it with amount = 0 to block ordering
+        if !existsInDelivery {
+            let foodEntry = FoodEntry(name: trimmedName, amount: 0)
+            modelContext.insert(foodEntry)
+        }
+
         return nil
     }
 
@@ -115,12 +112,8 @@ struct FoodTrackerTabView: View {
     }
 }
 
-struct FoodEntryRow: View {
-    let entry: FoodEntry
-
-    private var formattedAmount: String {
-        entry.amount.formatted(.number.precision(.fractionLength(0...2)))
-    }
+struct DineInEntryRow: View {
+    let entry: DineInEntry
 
     private var formattedCreatedAt: String {
         entry.createdAt.formatted(date: .abbreviated, time: .shortened)
@@ -137,8 +130,6 @@ struct FoodEntryRow: View {
                     .font(.body)
                     .lineLimit(1)
                 Spacer()
-                Text(formattedAmount)
-                    .font(.headline)
             }
 
             HStack {
@@ -152,8 +143,8 @@ struct FoodEntryRow: View {
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.blue.opacity(0.15))
-                    .foregroundColor(.blue)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundColor(.orange)
                     .clipShape(Capsule())
             }
         }
@@ -161,35 +152,15 @@ struct FoodEntryRow: View {
     }
 }
 
-struct TotalBadge: View {
-    let totalAmount: Double
-
-    private var formatted: String {
-        totalAmount.formatted(.number.precision(.fractionLength(0...2)))
-    }
-
-    var body: some View {
-        Text("Total: \(formatted)")
-            .font(.subheadline.weight(.semibold))
-            .padding(8)
-    }
-}
-
-struct FoodEntryDialog: View {
+struct DineInAddDialog: View {
     @Binding var isPresented: Bool
     let savedNames: [SavedName]
-    let onAdd: (String, Double) -> String?
+    let onAdd: (String) -> String?
     let onSaveName: (String) -> String?
 
     @State private var nameText = ""
-    @State private var amountText = ""
     @State private var errorMessage: String?
-    @FocusState private var focusedField: Field?
-
-    private enum Field {
-        case name
-        case amount
-    }
+    @FocusState private var focusedField: Bool
 
     private var filteredNames: [SavedName] {
         guard !nameText.isEmpty else { return savedNames }
@@ -205,13 +176,13 @@ struct FoodEntryDialog: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Name") {
+                Section("Restaurant Name") {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 8) {
                             TextField("Saved name or new name", text: $nameText)
                                 .textInputAutocapitalization(.words)
                                 .disableAutocorrection(true)
-                                .focused($focusedField, equals: .name)
+                                .focused($focusedField)
                             Button {
                                 addCurrentToSaved()
                             } label: {
@@ -233,7 +204,7 @@ struct FoodEntryDialog: View {
                                             nameText = suggestion.value
                                         } label: {
                                             HStack {
-                                                Image(systemName: "figure.outdoor.cycle")
+                                                Image(systemName: "fork.knife")
                                                 Text(suggestion.value)
                                                 Spacer()
                                                 if suggestion.value.caseInsensitiveCompare(nameText) == .orderedSame {
@@ -270,12 +241,6 @@ struct FoodEntryDialog: View {
                     }
                 }
 
-                Section("Amount") {
-                    TextField("Amount", text: $amountText)
-                        .keyboardType(.decimalPad)
-                        .focused($focusedField, equals: .amount)
-                }
-
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
@@ -283,12 +248,11 @@ struct FoodEntryDialog: View {
                     }
                 }
             }
-            .navigationTitle("Add Entry")
+            .navigationTitle("Add Dine-In")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                // Focus immediately to avoid keyboard delay when the sheet opens.
                 DispatchQueue.main.async {
-                    focusedField = .name
+                    focusedField = true
                 }
             }
             .toolbar {
@@ -299,33 +263,23 @@ struct FoodEntryDialog: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        attemptSave()
+                    Button("Add") {
+                        attemptAdd()
                     }
-                    .disabled(nameText.trimmingCharacters(in: .whitespaces).isEmpty || amountText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(nameText.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
     }
 
-    private func attemptSave() {
+    private func attemptAdd() {
         let trimmedName = nameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             errorMessage = "Name is required."
             return
         }
 
-        let normalizedAmountText = amountText.replacingOccurrences(of: ",", with: ".")
-        guard let amount = Double(normalizedAmountText) else {
-            errorMessage = "Enter a valid number."
-            return
-        }
-        guard amount > 0 else {
-            errorMessage = "Amount must be greater than zero."
-            return
-        }
-
-        errorMessage = onAdd(trimmedName, amount)
+        errorMessage = onAdd(trimmedName)
         guard errorMessage == nil else { return }
 
         resetFields()
@@ -340,8 +294,7 @@ struct FoodEntryDialog: View {
 
     private func resetFields() {
         nameText = ""
-        amountText = ""
         errorMessage = nil
-        focusedField = nil
+        focusedField = false
     }
 }
