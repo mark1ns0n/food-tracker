@@ -15,6 +15,7 @@ struct foodtrackerApp: App {
             Item.self,
             FoodEntry.self,
             SavedName.self,
+            DineInEntry.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

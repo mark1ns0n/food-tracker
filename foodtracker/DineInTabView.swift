@@ -69,13 +69,13 @@ struct DineInTabView: View {
 
         let normalizedName = trimmedName.lowercased()
         
-        // Check if already exists in DineIn list
+        // Check if already exists in DineIn list (ONLY check Dine-In, not Delivery)
         let duplicateInDineIn = activeEntries.contains { $0.name.lowercased() == normalizedName }
         guard !duplicateInDineIn else {
             return "That restaurant is already in the Dine-In list."
         }
 
-        // Add to DineIn
+        // Add to DineIn first
         let entry = DineInEntry(name: trimmedName)
         modelContext.insert(entry)
         saveName(trimmedName)
@@ -84,7 +84,7 @@ struct DineInTabView: View {
         let activeFoodEntries = foodEntries.filter { !$0.isExpired }
         let existsInDelivery = activeFoodEntries.contains { $0.name.lowercased() == normalizedName }
         
-        // If not in Delivery, add it with amount = 0 to block ordering
+        // If not in Delivery, add it with amount = 0 to block future delivery ordering
         if !existsInDelivery {
             let foodEntry = FoodEntry(name: trimmedName, amount: 0)
             modelContext.insert(foodEntry)
