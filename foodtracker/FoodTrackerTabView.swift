@@ -8,113 +8,6 @@
 import SwiftUI
 import SwiftData
 
-struct FoodTrackerTabView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \FoodEntry.createdAt, order: .reverse) private var entries: [FoodEntry]
-    @Query(sort: \SavedName.lastUsed, order: .reverse) private var savedNames: [SavedName]
-    @Query(sort: \DineInEntry.createdAt, order: .reverse) private var dineInEntries: [DineInEntry]
-
-    @State private var showAddDialog = false
-
-    private var activeEntries: [FoodEntry] {
-        entries.filter { !$0.isExpired }
-    }
-
-    private var totalAmount: Double {
-        activeEntries.reduce(0) { $0 + $1.amount }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if activeEntries.isEmpty {
-                    ContentUnavailableView("Nothing yet", systemImage: "bicycle", description: Text("Add your first entry to track amounts."))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                } else {
-                    ForEach(activeEntries) { entry in
-                        FoodEntryRow(entry: entry)
-                    }
-                }
-            }
-            .navigationTitle("Delivery")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    TotalBadge(totalAmount: totalAmount)
-                    Button(action: { showAddDialog = true }) {
-                        Label("Add", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-            .sheet(isPresented: $showAddDialog) {
-                FoodEntryDialog(
-                    isPresented: $showAddDialog,
-                    savedNames: savedNames,
-                    onAdd: { name, amount in handleAddEntry(name: name, amount: amount) },
-                    onSaveName: { name in saveName(name) }
-                )
-            }
-            .onAppear { pruneExpiredEntries() }
-            .onChange(of: entries.count) { pruneExpiredEntries() }
-        }
-    }
-
-    private func pruneExpiredEntries() {
-        let expiredEntries = entries.filter { $0.isExpired }
-        guard !expiredEntries.isEmpty else { return }
-
-        expiredEntries.forEach { modelContext.delete($0) }
-    }
-
-    private func handleAddEntry(name: String, amount: Double) -> String? {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            return "Name is required."
-        }
-        guard amount > 0 else {
-            return "Amount must be greater than zero."
-        }
-
-        let normalizedName = trimmedName.lowercased()
-        
-        // Check if restaurant is in active DineIn list - if so, block delivery ordering
-        let activeDineInEntries = dineInEntries.filter { !$0.isExpired }
-        let isInDineIn = activeDineInEntries.contains { $0.name.lowercased() == normalizedName }
-        guard !isInDineIn else {
-            return "Cannot order delivery from this restaurant - you dined in there recently."
-        }
-        
-        let allowsMultiple = normalizedName == "talabat mart"
-        let duplicate = activeEntries.contains { $0.name.lowercased() == normalizedName }
-        guard !duplicate || allowsMultiple else {
-            return "That name is already in the list."
-        }
-
-        let entry = FoodEntry(name: trimmedName, amount: amount)
-        modelContext.insert(entry)
-        saveName(trimmedName)
-        return nil
-    }
-
-    @discardableResult
-    private func saveName(_ value: String) -> String? {
-        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedValue.isEmpty else {
-            return "Name cannot be empty."
-        }
-
-        let normalized = trimmedValue.lowercased()
-        if let existing = savedNames.first(where: { $0.value.lowercased() == normalized }) {
-            existing.lastUsed = Date()
-            return nil
-        }
-
-        let newName = SavedName(value: trimmedValue)
-        modelContext.insert(newName)
-        return nil
-    }
-}
-
 struct FoodEntryRow: View {
     let entry: FoodEntry
 
@@ -299,8 +192,10 @@ struct FoodEntryDialog: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
+                    Button {
                         attemptSave()
+                    } label: {
+                        Image(systemName: "checkmark")
                     }
                     .disabled(nameText.trimmingCharacters(in: .whitespaces).isEmpty || amountText.trimmingCharacters(in: .whitespaces).isEmpty)
                 }

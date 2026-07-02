@@ -16,6 +16,8 @@ struct foodtrackerApp: App {
             FoodEntry.self,
             SavedName.self,
             DineInEntry.self,
+            FastingEntry.self,
+            FastingDebt.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -29,6 +31,10 @@ struct foodtrackerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    let context = sharedModelContainer.mainContext
+                    BackupService.shared.performAutoBackupIfNeeded(context: context)
+                }
         }
         .modelContainer(sharedModelContainer)
     }
