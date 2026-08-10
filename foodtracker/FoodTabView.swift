@@ -10,7 +10,8 @@ import SwiftUI
 import SwiftData
 
 struct FoodTabView: View {
-    @Environment(\.modelContext) private var modelContext
+    // No `modelContext` here any more: this view reads through `@Query` and
+    // writes through `FTWriter`, and has no way left to change a row directly.
     @Environment(\.ftWriter) private var writer
 
     // Groceries
@@ -287,30 +288,41 @@ struct FoodTabView: View {
         }
     }
 
-    /// Runs a mutation through the writer, or not at all.
+    /// Runs a mutation through the writer, or not at all, and says what to tell
+    /// the user when it did not happen.
     ///
-    /// A failure to append leaves the tables exactly as they were — the writer
+    /// A failed append leaves the tables exactly as they were — the writer
     /// projects only what the log accepted — so the message is the whole of the
-    /// feedback: the row on screen is still the truth.
-    private func write(_ mutation: (FTWriter) throws -> Void) {
+    /// feedback: what is on screen is still the truth.
+    private func attempt(_ mutation: (FTWriter) throws -> Void) -> String? {
         guard let writer else {
-            // No writer means no log (a preview). Showing the data without
-            // being able to record a change is better than changing a row the
-            // log will never mention.
-            return
+            // No writer means no log (a preview builds views without going
+            // through `foodtrackerApp`). Showing the data without being able to
+            // record a change beats changing a row the log will never mention.
+            return Self.writeFailureMessage
         }
         do {
             try mutation(writer)
+            return nil
         } catch {
             Logger(subsystem: FTSyncComposition.applicationIdentifier, category: "Sync")
                 .error("Could not record the change: \(String(describing: error))")
-            completionMessage = "Не удалось сохранить"
-            showCompletionNotification = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                showCompletionNotification = false
-            }
+            return Self.writeFailureMessage
         }
     }
+
+    /// The grocery rows have no dialog to carry a message back to, so theirs
+    /// goes to the overlay the auto-reset already uses.
+    private func write(_ mutation: (FTWriter) throws -> Void) {
+        guard let message = attempt(mutation) else { return }
+        completionMessage = message
+        showCompletionNotification = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            showCompletionNotification = false
+        }
+    }
+
+    private static let writeFailureMessage = "Could not save the change."
 
     // MARK: - Delivery Logic
 
@@ -337,10 +349,7 @@ struct FoodTabView: View {
         let duplicate = activeDeliveryEntries.contains { $0.name.lowercased() == normalizedName }
         guard !duplicate || allowsMultiple else { return "That name is already in the list." }
 
-        let entry = FoodEntry(name: trimmedName, amount: amount)
-        modelContext.insert(entry)
-        saveName(trimmedName)
-        return nil
+        return attempt { try $0.addDelivery(name: trimmedName, amount: amount) }
     }
 
     // MARK: - Dine-In Logic
@@ -354,36 +363,17 @@ struct FoodTabView: View {
         let duplicateInDineIn = activeDineInEntries.contains { $0.name.lowercased() == normalizedName }
         guard !duplicateInDineIn else { return "That restaurant is already in the Dine-In list." }
 
-        let entry = DineInEntry(name: trimmedName)
-        modelContext.insert(entry)
-        saveName(trimmedName)
-
-        let activeFoodEntries = foodEntries.filter { !$0.isExpired }
-        let existsInDelivery = activeFoodEntries.contains { $0.name.lowercased() == normalizedName }
-        if !existsInDelivery {
-            let foodEntry = FoodEntry(name: trimmedName, amount: 0)
-            modelContext.insert(foodEntry)
-        }
-
-        return nil
+        // The zero-amount delivery entry that follows from this is the writer's
+        // (decision 2): it is one cascade, on the device where it was pressed.
+        return attempt { try $0.addDineIn(name: trimmedName) }
     }
 
     // MARK: - Shared
 
-    @discardableResult
     private func saveName(_ value: String) -> String? {
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedValue.isEmpty else { return "Name cannot be empty." }
-
-        let normalized = trimmedValue.lowercased()
-        if let existing = savedNames.first(where: { $0.value.lowercased() == normalized }) {
-            existing.lastUsed = Date()
-            return nil
-        }
-
-        let newName = SavedName(value: trimmedValue)
-        modelContext.insert(newName)
-        return nil
+        return attempt { try $0.upsertSavedName(value: trimmedValue) }
     }
 }
 

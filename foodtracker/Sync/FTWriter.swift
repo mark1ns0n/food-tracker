@@ -66,6 +66,80 @@ enum FTGroceryEvent {
     }
 }
 
+/// A delivery entry is only ever created: the UI has no edit, and expiry hides
+/// a row instead of deleting it (decision 1 of F01), so there is no `update` or
+/// `delete` draft to write.
+enum FTDeliveryEvent {
+    static func createDraft(
+        entityID: UUID,
+        name: String,
+        amount: Double,
+        createdAt: Date,
+        id: UUID? = nil
+    ) -> LocalEventDraft {
+        LocalEventDraft(
+            id: id,
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.delivery,
+            entityID: entityID,
+            operation: .create,
+            payload: FTDeliveryPayload(name: name, amount: amount, createdAt: createdAt).value
+        )
+    }
+}
+
+/// Create-only for the same reasons as `FTDeliveryEvent`.
+enum FTDineInEvent {
+    static func createDraft(
+        entityID: UUID,
+        name: String,
+        createdAt: Date,
+        id: UUID? = nil
+    ) -> LocalEventDraft {
+        LocalEventDraft(
+            id: id,
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.dineIn,
+            entityID: entityID,
+            operation: .create,
+            payload: FTDineInPayload(name: name, createdAt: createdAt).value
+        )
+    }
+}
+
+/// The entity id comes from the name itself (F01.06), so a `create` from a
+/// second device is an upsert of the same entity rather than a duplicate.
+enum FTSavedNameEvent {
+    static func createDraft(
+        entityID: UUID,
+        value: String,
+        lastUsed: Date,
+        id: UUID? = nil
+    ) -> LocalEventDraft {
+        LocalEventDraft(
+            id: id,
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.savedName,
+            entityID: entityID,
+            operation: .create,
+            payload: FTSavedNamePayload(value: value, lastUsed: lastUsed).jsonValue
+        )
+    }
+
+    /// Reuse carries the date only, so the spelling stays as it was first
+    /// typed — the suggestion list is not rewritten by someone typing the same
+    /// restaurant in lower case.
+    static func updateDraft(entityID: UUID, lastUsed: Date) -> LocalEventDraft {
+        LocalEventDraft(
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.savedName,
+            entityID: entityID,
+            operation: .update,
+            payload: FTSavedNamePayload(lastUsed: lastUsed).jsonValue
+        )
+    }
+}
+
 // MARK: - The writer
 
 /// Every user mutation, as an event first.
@@ -140,6 +214,92 @@ final class FTWriter {
         try write(ids.map {
             FTGroceryEvent.updateDraft(entityID: $0, FTGroceryPayload(status: .available))
         })
+    }
+
+    // MARK: Delivery, dine-in, and the names behind them
+
+    /// An order also remembers who it was from, so the two events go down
+    /// together: a delivery whose name never made it into the suggestions would
+    /// leave the user retyping it on the next device.
+    @discardableResult
+    func addDelivery(name: String, amount: Double, createdAt: Date = Date()) throws -> UUID {
+        let entityID = UUID()
+        try write(
+            [
+                FTDeliveryEvent.createDraft(
+                    entityID: entityID,
+                    name: name,
+                    amount: amount,
+                    createdAt: createdAt
+                )
+            ] + savedNameDrafts(value: name, lastUsed: createdAt)
+        )
+        return entityID
+    }
+
+    /// Eating in also puts the restaurant in the delivery list at zero, which is
+    /// what stops an order from there for the next thirty days.
+    ///
+    /// The cascade runs here, on the device where the user acted (decision 2),
+    /// and travels as ordinary events; the projector runs no cascades, so the
+    /// other device receives this one zero-amount entry rather than inventing
+    /// its own.
+    @discardableResult
+    func addDineIn(name: String, createdAt: Date = Date()) throws -> UUID {
+        let entityID = UUID()
+        var drafts = [FTDineInEvent.createDraft(entityID: entityID, name: name, createdAt: createdAt)]
+        if try !hasActiveDelivery(named: name) {
+            drafts.append(
+                FTDeliveryEvent.createDraft(
+                    entityID: UUID(),
+                    name: name,
+                    amount: 0,
+                    createdAt: createdAt
+                )
+            )
+        }
+        drafts += try savedNameDrafts(value: name, lastUsed: createdAt)
+        try write(drafts)
+        return entityID
+    }
+
+    /// The "+" in the dialogs: remember this name without ordering anything.
+    func upsertSavedName(value: String, lastUsed: Date = Date()) throws {
+        try write(savedNameDrafts(value: value, lastUsed: lastUsed))
+    }
+
+    /// `create` for a name the log has never held, `update {lastUsed}` for one
+    /// it has. Both address the same entity id, derived from the lower-cased
+    /// name, so "Talabat" and "talabat" are one suggestion and not two.
+    private func savedNameDrafts(value: String, lastUsed: Date) throws -> [LocalEventDraft] {
+        let entityID = FTIDs.savedName(value: value)
+        let known = try FTSavedNameProjection.project(
+            store.projection(
+                entityType: FTEntity.savedName,
+                entityID: entityID,
+                supportedSchemaVersion: FTEntity.schemaVersion
+            ),
+            entityID: entityID
+        ) != nil
+        return [
+            known
+                ? FTSavedNameEvent.updateDraft(entityID: entityID, lastUsed: lastUsed)
+                : FTSavedNameEvent.createDraft(entityID: entityID, value: value, lastUsed: lastUsed)
+        ]
+    }
+
+    /// Whether the user already has a delivery entry for this restaurant that
+    /// has not expired.
+    ///
+    /// Asked of the table rather than of the log, and deliberately: the question
+    /// is what the user is looking at, and until the backfill of F01.11 the
+    /// table also holds rows written before the log existed. Expiry stays a
+    /// projection over `createdAt` on the model (decision 1), so there is one
+    /// definition of "active" rather than a second one here.
+    private func hasActiveDelivery(named name: String) throws -> Bool {
+        let normalized = name.lowercased()
+        return try modelContext.fetch(FetchDescriptor<FoodEntry>())
+            .contains { !$0.isExpired && $0.name.lowercased() == normalized }
     }
 
     // MARK: Writing
