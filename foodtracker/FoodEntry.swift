@@ -10,6 +10,8 @@ import SwiftData
 
 @Model
 final class FoodEntry {
+    /// Stable identity for sync (F01.02) — see `Item.id`.
+    var id: UUID = UUID()
     var name: String
     var amount: Double
     var createdAt: Date
@@ -17,7 +19,8 @@ final class FoodEntry {
     private static let secondsInDay: TimeInterval = 60 * 60 * 24
     private static let expirationInterval: TimeInterval = secondsInDay * 30
 
-    init(name: String, amount: Double, createdAt: Date = Date()) {
+    init(name: String, amount: Double, createdAt: Date = Date(), id: UUID = UUID()) {
+        self.id = id
         self.name = name
         self.amount = amount
         self.createdAt = createdAt

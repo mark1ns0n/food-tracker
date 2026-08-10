@@ -10,6 +10,10 @@ import SwiftData
 
 @Model
 final class FastingEntry {
+    /// Stable identity for sync (F01.02) — see `Item.id`. The schedule is a
+    /// singleton and F01.06 gives it a deterministic per-device event ID, so
+    /// this one is model identity rather than the sync key.
+    var id: UUID = UUID()
     /// Scheduled start time (hour & minute only, repeats daily)
     var startHour: Int
     var startMinute: Int
@@ -19,7 +23,14 @@ final class FastingEntry {
     var activeStartDate: Date?
     var createdAt: Date
 
-    init(startHour: Int, startMinute: Int, durationMinutes: Int, createdAt: Date = Date()) {
+    init(
+        startHour: Int,
+        startMinute: Int,
+        durationMinutes: Int,
+        createdAt: Date = Date(),
+        id: UUID = UUID()
+    ) {
+        self.id = id
         self.startHour = startHour
         self.startMinute = startMinute
         self.durationMinutes = durationMinutes

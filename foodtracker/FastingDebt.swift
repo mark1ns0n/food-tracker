@@ -10,12 +10,15 @@ import SwiftData
 
 @Model
 final class FastingDebt {
+    /// Stable identity for sync (F01.02) — see `Item.id`.
+    var id: UUID = UUID()
     /// How many minutes of fasting were missed
     var missedMinutes: Int
     /// When the user pressed "I ate"
     var createdAt: Date
 
-    init(missedMinutes: Int, createdAt: Date = Date()) {
+    init(missedMinutes: Int, createdAt: Date = Date(), id: UUID = UUID()) {
+        self.id = id
         self.missedMinutes = missedMinutes
         self.createdAt = createdAt
     }

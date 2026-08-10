@@ -23,6 +23,10 @@ enum GroceryType: String, Codable, CaseIterable, Identifiable {
 
 @Model
 final class Item {
+    /// Stable identity for sync (F01.02). Defaulted so SwiftData applies a
+    /// lightweight additive migration and existing rows get a fresh UUID on
+    /// first open; `ft.*` event IDs are derived from it in F01.06.
+    var id: UUID = UUID()
     var name: String
     var status: ItemStatus
     var type: GroceryType?
@@ -33,7 +37,13 @@ final class Item {
         set { type = newValue }
     }
 
-    init(name: String, status: ItemStatus = .available, type: GroceryType = .main) {
+    init(
+        name: String,
+        status: ItemStatus = .available,
+        type: GroceryType = .main,
+        id: UUID = UUID()
+    ) {
+        self.id = id
         self.name = name
         self.status = status
         self.type = type
