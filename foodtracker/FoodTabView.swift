@@ -212,10 +212,6 @@ struct FoodTabView: View {
                     onSaveName: { name in saveName(name) }
                 )
             }
-            .onAppear {
-                pruneExpiredDeliveryEntries()
-                pruneExpiredDineInEntries()
-            }
         }
     }
 
@@ -294,11 +290,11 @@ struct FoodTabView: View {
 
     // MARK: - Delivery Logic
 
-    private func pruneExpiredDeliveryEntries() {
-        let expired = foodEntries.filter { $0.isExpired }
-        guard !expired.isEmpty else { return }
-        expired.forEach { modelContext.delete($0) }
-    }
+    // Expiry is a *view* rule, not a deletion (F01.03): a row older than 30 days
+    // drops out of `activeDeliveryEntries` on its own. Deleting it on appear
+    // destroyed history no one asked to lose, and once the log is the source of
+    // truth (F01.11) a local delete would have to travel as a real tombstone —
+    // saying "this never happened" about a delivery that did.
 
     private func handleAddDeliveryEntry(name: String, amount: Double) -> String? {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -324,12 +320,6 @@ struct FoodTabView: View {
     }
 
     // MARK: - Dine-In Logic
-
-    private func pruneExpiredDineInEntries() {
-        let expired = dineInEntries.filter { $0.isExpired }
-        guard !expired.isEmpty else { return }
-        expired.forEach { modelContext.delete($0) }
-    }
 
     private func handleAddDineInEntry(name: String) -> String? {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
