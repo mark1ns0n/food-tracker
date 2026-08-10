@@ -5,17 +5,21 @@
 //  Created by Ivan Markin on 03.03.2026.
 //
 
+import OSLog
 import SwiftUI
 import SwiftData
 import UserNotifications
 
 struct FastingTabView: View {
-    @Environment(\.modelContext) private var modelContext
+    // No `modelContext`: the schedule and the debts change by being written to
+    // the log first, and this view has no way left to touch a row directly.
+    @Environment(\.ftWriter) private var writer
     @Query private var entries: [FastingEntry]
     @Query(sort: \FastingDebt.createdAt, order: .reverse) private var debts: [FastingDebt]
 
     @State private var now = Date()
     @State private var timerTask: Timer?
+    @State private var writeFailure: String?
 
     private var entry: FastingEntry? { entries.first }
 
@@ -55,6 +59,11 @@ struct FastingTabView: View {
                 }
             }
             .navigationTitle("Fasting")
+            .overlay {
+                if let writeFailure {
+                    NotificationOverlay(message: writeFailure)
+                }
+            }
             .onAppear {
                 timerTask = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     Task { @MainActor in
@@ -87,7 +96,7 @@ struct FastingTabView: View {
             }
             if !entry.isFasting {
                 Button("Change Settings", role: .destructive) {
-                    deleteEntry(entry)
+                    deleteSchedule()
                 }
             }
         }
@@ -181,12 +190,14 @@ struct FastingTabView: View {
     private var setupSection: some View {
         Section {
             FastingSetupView { hour, minute, durationMinutes in
-                let newEntry = FastingEntry(
-                    startHour: hour,
-                    startMinute: minute,
-                    durationMinutes: durationMinutes
-                )
-                modelContext.insert(newEntry)
+                let recorded = write {
+                    try $0.createFastingSchedule(
+                        startHour: hour,
+                        startMinute: minute,
+                        durationMinutes: durationMinutes
+                    )
+                }
+                guard recorded else { return }
                 scheduleStartNotification(hour: hour, minute: minute)
             }
         }
@@ -194,18 +205,22 @@ struct FastingTabView: View {
 
     // MARK: - Actions
 
+    // The schedule and the debts reach the tables through `FTWriter` only, so
+    // what is on screen is what a replay of the log would rebuild. The
+    // notifications stay here, next to the call that earned them, and are only
+    // (re)scheduled once the change is actually in the log: reminding the user
+    // about a fast that was never recorded would be a lie the log cannot back.
+
     private func startFasting(entry: FastingEntry) {
-        withAnimation {
-            entry.activeStartDate = Date()
-        }
+        let recorded = withAnimation { write { try $0.startFast() } }
+        guard recorded else { return }
         cancelAllFastingNotifications()
         scheduleEndNotification(after: entry.durationMinutes)
     }
 
     private func stopFasting(entry: FastingEntry) {
-        withAnimation {
-            entry.activeStartDate = nil
-        }
+        let recorded = withAnimation { write { try $0.stopFast() } }
+        guard recorded else { return }
         cancelAllFastingNotifications()
         scheduleStartNotification(hour: entry.startHour, minute: entry.startMinute)
     }
@@ -213,27 +228,54 @@ struct FastingTabView: View {
     private func iAte(entry: FastingEntry) {
         guard let start = entry.activeStartDate else { return }
 
+        // The arithmetic stays in the view: it is the one holding the clock, and
+        // the minutes it works out here are an observation of this moment that
+        // travels ready-made rather than something a replay recomputes.
         let elapsedSeconds = Date().timeIntervalSince(start)
         let totalSeconds = TimeInterval(entry.durationMinutes * 60)
         let remainingSeconds = max(0, totalSeconds - elapsedSeconds)
         let missedMinutes = Int(ceil(remainingSeconds / 60))
 
-        if missedMinutes > 0 {
-            let debt = FastingDebt(missedMinutes: missedMinutes)
-            modelContext.insert(debt)
-        }
-
-        withAnimation {
-            entry.activeStartDate = nil
-        }
+        let recorded = withAnimation { write { try $0.recordIAte(missedMinutes: missedMinutes) } }
+        guard recorded else { return }
         cancelAllFastingNotifications()
         scheduleStartNotification(hour: entry.startHour, minute: entry.startMinute)
     }
 
-    private func deleteEntry(_ entry: FastingEntry) {
+    private func deleteSchedule() {
+        let recorded = withAnimation { write { try $0.deleteFastingSchedule() } }
+        guard recorded else { return }
         cancelAllFastingNotifications()
-        withAnimation {
-            modelContext.delete(entry)
+    }
+
+    /// Runs a mutation through the writer and says whether it happened.
+    ///
+    /// A failed append changes nothing — the writer projects only what the log
+    /// accepted — so the row on screen is still the truth and the message is the
+    /// whole of the feedback.
+    private func write(_ mutation: (FTWriter) throws -> Void) -> Bool {
+        guard let writer else {
+            // A preview builds this view without going through `foodtrackerApp`,
+            // so it has no log to write to; it shows the data and refuses to
+            // change it.
+            showWriteFailure()
+            return false
+        }
+        do {
+            try mutation(writer)
+            return true
+        } catch {
+            Logger(subsystem: FTSyncComposition.applicationIdentifier, category: "Sync")
+                .error("Could not record the change: \(String(describing: error))")
+            showWriteFailure()
+            return false
+        }
+    }
+
+    private func showWriteFailure() {
+        writeFailure = "Could not save the change."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            writeFailure = nil
         }
     }
 

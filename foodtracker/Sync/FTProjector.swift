@@ -405,7 +405,15 @@ extension SavedName: FTProjectable {
 
 extension FastingEntry: FTProjectable {
     static let ftEntityType = FTEntity.fastingSchedule
-    var ftEntityID: UUID { id }
+
+    /// The one `ftEntityID` that is not the row's own id: the schedule is a
+    /// singleton, and F01.06 gave it a fixed entity id rather than a row id.
+    ///
+    /// So every row in this table *is* that one entity, whatever id it was
+    /// stored under — which is what lets the projector adopt the schedule the
+    /// user set up before the log existed, instead of leaving it beside a second
+    /// row and making `entries.first` a coin toss.
+    var ftEntityID: UUID { FTIDs.fastingSchedule() }
 
     static func project(
         _ slice: ProjectionSlice,

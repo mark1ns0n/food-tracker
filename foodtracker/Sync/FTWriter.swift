@@ -140,6 +140,83 @@ enum FTSavedNameEvent {
     }
 }
 
+/// The schedule is a singleton, so its entity id is not a row id but the
+/// constant of `FTIDs.fastingSchedule()` — the drafts take no id at all.
+///
+/// "Change Settings" is a real `delete` and the setup that follows it a real
+/// `create`: the user is not editing a schedule, they are throwing one away and
+/// writing another. Resurrection after a tombstone is the ordinary B01 edge case,
+/// and the fold already handles it.
+enum FTFastingScheduleEvent {
+    static func createDraft(
+        startHour: Int,
+        startMinute: Int,
+        durationMinutes: Int,
+        activeStartDate: Date? = nil,
+        id: UUID? = nil
+    ) -> LocalEventDraft {
+        LocalEventDraft(
+            id: id,
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.fastingSchedule,
+            entityID: FTIDs.fastingSchedule(),
+            operation: .create,
+            payload: FTFastingSchedulePayload(
+                startHour: startHour,
+                startMinute: startMinute,
+                durationMinutes: durationMinutes,
+                // Always mentioned, even when there is no fast running: a
+                // `create` carries the entity whole.
+                activeStartDate: .some(activeStartDate)
+            ).value
+        )
+    }
+
+    static func updateDraft(_ payload: FTFastingSchedulePayload) -> LocalEventDraft {
+        LocalEventDraft(
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.fastingSchedule,
+            entityID: FTIDs.fastingSchedule(),
+            operation: .update,
+            payload: payload.value
+        )
+    }
+
+    static func deleteDraft() -> LocalEventDraft {
+        LocalEventDraft(
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.fastingSchedule,
+            entityID: FTIDs.fastingSchedule(),
+            operation: .delete,
+            payload: .object([:])
+        )
+    }
+}
+
+/// A debt is an observation of a moment that has passed, so it is only ever
+/// created: the minutes are computed when the button is pressed and travel
+/// already worked out.
+enum FTFastingDebtEvent {
+    static func createDraft(
+        entityID: UUID,
+        missedMinutes: Int,
+        createdAt: Date,
+        id: UUID? = nil
+    ) -> LocalEventDraft {
+        LocalEventDraft(
+            id: id,
+            schemaVersion: FTEntity.schemaVersion,
+            entityType: FTEntity.fastingDebt,
+            entityID: entityID,
+            operation: .create,
+            payload: FTFastingDebtPayload(
+                missedMinutes: missedMinutes,
+                createdAt: createdAt
+            ).value
+        )
+    }
+}
+
 // MARK: - The writer
 
 /// Every user mutation, as an event first.
@@ -302,6 +379,75 @@ final class FTWriter {
             .contains { !$0.isExpired && $0.name.lowercased() == normalized }
     }
 
+    // MARK: Fasting
+
+    /// Setting a schedule up, and setting one up again after "Change Settings"
+    /// threw the last one away.
+    ///
+    /// No guard against one already existing: a `create` carries the schedule
+    /// whole and replaces what the fold held, which is what makes it both the
+    /// first setup and the resurrection.
+    func createFastingSchedule(startHour: Int, startMinute: Int, durationMinutes: Int) throws {
+        try write([
+            FTFastingScheduleEvent.createDraft(
+                startHour: startHour,
+                startMinute: startMinute,
+                durationMinutes: durationMinutes
+            )
+        ])
+    }
+
+    /// "Change Settings" — the schedule is gone until a new one is set up.
+    ///
+    /// The tombstone stands on its own, without materializing first: it says the
+    /// user has no schedule any more, and that is true whether or not the log
+    /// ever heard of the one they were looking at.
+    func deleteFastingSchedule() throws {
+        try write([FTFastingScheduleEvent.deleteDraft()])
+    }
+
+    func startFast(at date: Date = Date()) throws {
+        try inLogSchedule()
+        try write([
+            FTFastingScheduleEvent.updateDraft(FTFastingSchedulePayload(activeStartDate: .some(date)))
+        ])
+    }
+
+    /// Stopping clears the start date with an explicit JSON null: an absent key
+    /// would only mean "this event does not mention it", and the fast would keep
+    /// running.
+    func stopFast() throws {
+        try inLogSchedule()
+        try write([FTFastingScheduleEvent.updateDraft(clearActiveStartDate)])
+    }
+
+    /// "I Ate": the fast ends early and the minutes it was short travel with it.
+    ///
+    /// The view works the minutes out — it is the one holding the clock — and
+    /// they go into the payload already computed, because a debt records what was
+    /// true at the moment of the button, not something a later replay recomputes.
+    /// Both events go down together, so no device ever sees a debt without the
+    /// stop that earned it.
+    func recordIAte(missedMinutes: Int, at date: Date = Date()) throws {
+        try inLogSchedule()
+        var drafts: [LocalEventDraft] = []
+        if missedMinutes > 0 {
+            drafts.append(
+                FTFastingDebtEvent.createDraft(
+                    entityID: UUID(),
+                    missedMinutes: missedMinutes,
+                    createdAt: date
+                )
+            )
+        }
+        drafts.append(FTFastingScheduleEvent.updateDraft(clearActiveStartDate))
+        try write(drafts)
+    }
+
+    private var clearActiveStartDate: FTFastingSchedulePayload {
+        FTFastingSchedulePayload(activeStartDate: .some(nil))
+    }
+
     // MARK: Writing
 
     @discardableResult
@@ -364,6 +510,62 @@ final class FTWriter {
         }
         return projection
     }
+
+    /// The same guarantee as `inLog(_:)`, for the schedule the user is looking
+    /// at: start, stop and "I Ate" are all `update`s, and an `update` on a slice
+    /// the log has never held projects to `nil` — the fast would appear not to
+    /// start at all.
+    ///
+    /// The schedule set up before any of this existed is materialized from the
+    /// row, with its running fast intact, so stopping one that started yesterday
+    /// still records a stop rather than a schedule appearing out of nowhere with
+    /// no fast in it.
+    @discardableResult
+    private func inLogSchedule() throws -> FTFastingScheduleProjection {
+        if let projection = try scheduleProjection() {
+            return projection
+        }
+        // A tombstone means the user pressed "Change Settings"; the buttons that
+        // land here are not on screen then, and a mutation now would resurrect a
+        // schedule as a side effect.
+        guard try scheduleSlice().events.isEmpty else {
+            throw FTWriterError.deletedSchedule
+        }
+        // `entries.first`, the same way the view reads it: the schedule is a
+        // singleton, and any second row is a leftover the projection replaces.
+        guard let row = try modelContext.fetch(FetchDescriptor<FastingEntry>()).first else {
+            throw FTWriterError.unknownSchedule
+        }
+
+        try write([
+            FTFastingScheduleEvent.createDraft(
+                startHour: row.startHour,
+                startMinute: row.startMinute,
+                durationMinutes: row.durationMinutes,
+                activeStartDate: row.activeStartDate
+            )
+        ])
+
+        guard let projection = try scheduleProjection() else {
+            throw FTWriterError.unknownSchedule
+        }
+        return projection
+    }
+
+    private func scheduleSlice() throws -> ProjectionSlice {
+        try store.projection(
+            entityType: FTEntity.fastingSchedule,
+            entityID: FTIDs.fastingSchedule(),
+            supportedSchemaVersion: FTEntity.schemaVersion
+        )
+    }
+
+    private func scheduleProjection() throws -> FTFastingScheduleProjection? {
+        try FTFastingScheduleProjection.project(
+            try scheduleSlice(),
+            entityID: FTIDs.fastingSchedule()
+        )
+    }
 }
 
 enum FTWriterError: Error, Equatable {
@@ -371,4 +573,9 @@ enum FTWriterError: Error, Equatable {
     case unknownGrocery(UUID)
     /// The log holds it and says it was deleted.
     case deletedGrocery(UUID)
+    /// There is no schedule to start, stop or break — nowhere, not in the log
+    /// and not in the table.
+    case unknownSchedule
+    /// The log holds the schedule and says "Change Settings" threw it away.
+    case deletedSchedule
 }
