@@ -5,6 +5,7 @@
 //  Created by Ivan Markin on 15.01.2026.
 //
 
+import AppShell
 import CoreSync
 import SwiftUI
 import SwiftData
@@ -15,6 +16,8 @@ struct foodtrackerApp: App {
     private let eventStore: SQLiteEventStore
     private let writer: FTWriter
     private let backfill: FTBackfillService
+    private let syncCoordinator: FTSyncCoordinator?
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let schema = Schema([
@@ -36,16 +39,27 @@ struct foodtrackerApp: App {
             fatalError("Could not create ModelContainer: \(error)")
         }
 
-        do {
-            // F01.05 left a store that would not open as a log line, because
-            // nothing wrote to it yet. From here on a grocery mutation is an
-            // event before it is a row: an app running without its log would
-            // accept edits nobody records, and the first replay would erase
-            // them. Refusing to start is the smaller loss, and it is what
-            // workhardercomrade does with the same failure.
-            eventStore = try FTSyncComposition.makeEventStore()
-        } catch {
-            fatalError("Could not open the event store: \(error)")
+        // The bootstrap owns the same store `makeEventStore()` would open, plus
+        // the transport behind it — one instance, not two connections to one
+        // database. Failing to compose it (keychain trouble, usually) only
+        // costs the network half: the bare store keeps the app fully
+        // offline-functional, which is the failure mode F01.13 asks for.
+        if let bootstrap = FTSyncComposition.makeSyncBootstrap() {
+            eventStore = bootstrap.eventStore
+            syncCoordinator = FTSyncCoordinator(bootstrap: bootstrap)
+        } else {
+            do {
+                // F01.05 left a store that would not open as a log line, because
+                // nothing wrote to it yet. From here on a grocery mutation is an
+                // event before it is a row: an app running without its log would
+                // accept edits nobody records, and the first replay would erase
+                // them. Refusing to start is the smaller loss, and it is what
+                // workhardercomrade does with the same failure.
+                eventStore = try FTSyncComposition.makeEventStore()
+            } catch {
+                fatalError("Could not open the event store: \(error)")
+            }
+            syncCoordinator = nil
         }
 
         let context = sharedModelContainer.mainContext
@@ -56,6 +70,9 @@ struct foodtrackerApp: App {
             store: eventStore,
             projector: projector
         )
+        writer.onLocalEventAppended = { [syncCoordinator] in
+            syncCoordinator?.noteLocalMutation()
+        }
     }
 
     var body: some Scene {
@@ -81,6 +98,11 @@ struct foodtrackerApp: App {
                 }
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                syncCoordinator?.noteScenePhaseActive()
+            }
+        }
     }
 }
 

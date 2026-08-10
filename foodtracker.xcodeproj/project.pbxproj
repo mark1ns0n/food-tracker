@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		F01000010000000000000022 /* CoreSync in Frameworks */ = {isa = PBXBuildFile; productRef = F01000010000000000000021 /* CoreSync */; };
 		F01000010000000000000024 /* CoreSync in Frameworks */ = {isa = PBXBuildFile; productRef = F01000010000000000000023 /* CoreSync */; };
+		F01000010000000000000026 /* AppShell in Frameworks */ = {isa = PBXBuildFile; productRef = F01000010000000000000025 /* AppShell */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +46,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F01000010000000000000022 /* CoreSync in Frameworks */,
+				F01000010000000000000026 /* AppShell in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,6 +100,7 @@
 			name = foodtracker;
 			packageProductDependencies = (
 				F01000010000000000000021 /* CoreSync */,
+				F01000010000000000000025 /* AppShell */,
 			);
 			productName = foodtracker;
 			productReference = BF3E03D22F1972E900370E5B /* foodtracker.app */;
@@ -490,6 +493,10 @@
 		F01000010000000000000021 /* CoreSync */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = CoreSync;
+		};
+		F01000010000000000000025 /* AppShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppShell;
 		};
 		F01000010000000000000023 /* CoreSync */ = {
 			isa = XCSwiftPackageProductDependency;

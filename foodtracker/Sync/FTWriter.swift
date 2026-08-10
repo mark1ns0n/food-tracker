@@ -232,6 +232,11 @@ enum FTFastingDebtEvent {
 /// the events does not generate its own copy.
 @MainActor
 final class FTWriter {
+    /// Fired after every successful append, so the sync coordinator (F01.13)
+    /// can schedule a push. The writer does not know what listens — phases 1–2
+    /// ran with nobody attached, and previews still do.
+    var onLocalEventAppended: (() -> Void)?
+
     private let modelContext: ModelContext
     private let store: SQLiteEventStore
     private let projector: FTProjector
@@ -454,6 +459,7 @@ final class FTWriter {
     private func write(_ drafts: [LocalEventDraft]) throws -> [SyncEvent] {
         let events = try store.appendLocalEvents(drafts)
         try projector.apply(events)
+        onLocalEventAppended?()
         return events
     }
 

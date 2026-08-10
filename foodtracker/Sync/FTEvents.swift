@@ -21,6 +21,21 @@ enum FTEntity {
     static let fastingDebt = "ft.FastingDebt"
 
     static let schemaVersion = 1
+
+    /// What this client can read, keyed the way the sync engine wants it
+    /// (the `SavingsEventStore.capabilities` shape). Everything else the
+    /// account holds (`su.*`, `ban.*`, …) still arrives — the server does not
+    /// filter by these — lands in the store and is blocked as requiring
+    /// upgrade, the same stance kopilka takes. In F01.16 this table travels to
+    /// the kit, where super-app merges it into its own capabilities (F01.17).
+    static let capabilities: [String: Int] = [
+        grocery: schemaVersion,
+        delivery: schemaVersion,
+        dineIn: schemaVersion,
+        savedName: schemaVersion,
+        fastingSchedule: schemaVersion,
+        fastingDebt: schemaVersion,
+    ]
 }
 
 // MARK: - Wire tokens
