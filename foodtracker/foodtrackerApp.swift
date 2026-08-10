@@ -14,6 +14,7 @@ struct foodtrackerApp: App {
     let sharedModelContainer: ModelContainer
     private let eventStore: SQLiteEventStore
     private let writer: FTWriter
+    private let backfill: FTBackfillService
 
     init() {
         let schema = Schema([
@@ -48,10 +49,12 @@ struct foodtrackerApp: App {
         }
 
         let context = sharedModelContainer.mainContext
-        writer = FTWriter(
+        let projector = FTProjector(eventLog: eventStore, modelContext: context)
+        writer = FTWriter(modelContext: context, store: eventStore, projector: projector)
+        backfill = FTBackfillService(
             modelContext: context,
             store: eventStore,
-            projector: FTProjector(eventLog: eventStore, modelContext: context)
+            projector: projector
         )
     }
 
@@ -60,6 +63,19 @@ struct foodtrackerApp: App {
             ContentView()
                 .environment(\.ftWriter, writer)
                 .onAppear {
+                    do {
+                        // Before the auto-backup, so what gets backed up is the
+                        // state the replay just rebuilt, not the tables it was
+                        // about to rewrite.
+                        try backfill.runIfNeeded()
+                    } catch {
+                        // The same stance as the store that would not open: an
+                        // app that keeps running here goes on accepting edits
+                        // while rows the log has never heard of sit in the
+                        // store — and the first sync would push fresh events
+                        // with no history behind them.
+                        fatalError("Could not backfill the event log: \(error)")
+                    }
                     let context = sharedModelContainer.mainContext
                     BackupService.shared.performAutoBackupIfNeeded(context: context)
                 }

@@ -12,6 +12,12 @@ import UniformTypeIdentifiers
 struct BackupView: View {
     @Environment(\.modelContext) private var modelContext
 
+    /// Once the backfill has run (F01.11), the event log stands behind the
+    /// store, and a restore would wipe and rewrite the tables behind its back —
+    /// the store and the log would disagree forever after. Import goes away;
+    /// export stays, it only reads.
+    @AppStorage(FTBackfillService.doneKey) private var backfillDone = false
+
     @State private var backups: [BackupFile] = []
     @State private var isExporting = false
     @State private var showImportConfirm = false
@@ -36,13 +42,19 @@ struct BackupView: View {
                 }
 
                 Section {
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("Import from File", systemImage: "square.and.arrow.down")
+                    if !backfillDone {
+                        Button {
+                            showFileImporter = true
+                        } label: {
+                            Label("Import from File", systemImage: "square.and.arrow.down")
+                        }
                     }
                 } footer: {
-                    Text("Import a backup JSON file from Files, AirDrop, or any other source.")
+                    Text(
+                        backfillDone
+                            ? "Import is turned off: this device's data has moved into the sync log, and restoring a backup would overwrite it. Backups remain available for export."
+                            : "Import a backup JSON file from Files, AirDrop, or any other source."
+                    )
                 }
 
                 Section("Local Backups") {
@@ -64,6 +76,7 @@ struct BackupView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
+                                .disabled(backfillDone)
 
                                 Spacer()
 
