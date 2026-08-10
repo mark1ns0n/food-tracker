@@ -5,11 +5,13 @@
 //  Created by Claude on 04.03.2026.
 //
 
+import OSLog
 import SwiftUI
 import SwiftData
 
 struct FoodTabView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.ftWriter) private var writer
 
     // Groceries
     @Query(sort: \Item.createdAt) private var items: [Item]
@@ -220,8 +222,7 @@ struct FoodTabView: View {
     private func addNewGrocery() {
         guard !newGroceryName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         withAnimation {
-            let newItem = Item(name: newGroceryName, type: newGroceryType)
-            modelContext.insert(newItem)
+            write { try $0.addGrocery(name: newGroceryName, type: newGroceryType) }
             newGroceryName = ""
         }
     }
@@ -229,16 +230,14 @@ struct FoodTabView: View {
     private func toggleGroceryStatus(_ item: Item) {
         let type = item.groceryType
         withAnimation {
-            item.status = (item.status == .available) ? .used : .available
+            write { try $0.toggleGrocery(id: item.id) }
         }
         checkIfAllGroceriesUsed(in: type)
     }
 
     private func resetGroceries(in type: GroceryType) {
         withAnimation {
-            for item in items(of: type) {
-                item.status = .available
-            }
+            write { try $0.resetGroceries(ids: items(of: type).map(\.id)) }
         }
     }
 
@@ -256,7 +255,7 @@ struct FoodTabView: View {
 
     private func deleteGrocery(_ item: Item) {
         withAnimation {
-            modelContext.delete(item)
+            write { try $0.deleteGrocery(id: item.id) }
         }
     }
 
@@ -267,15 +266,16 @@ struct FoodTabView: View {
     }
 
     private func refreshFullyUsedTypes() {
+        // One call, so the whole refresh is one transaction in the log rather
+        // than one per type.
+        let ids = GroceryType.allCases.flatMap { type -> [UUID] in
+            let typeItems = items(of: type)
+            guard !typeItems.isEmpty, availableGroceries(of: type).isEmpty else { return [] }
+            return typeItems.map(\.id)
+        }
+        guard !ids.isEmpty else { return }
         withAnimation {
-            for type in GroceryType.allCases {
-                let typeItems = items(of: type)
-                guard !typeItems.isEmpty,
-                      availableGroceries(of: type).isEmpty else { continue }
-                for item in typeItems {
-                    item.status = .available
-                }
-            }
+            write { try $0.resetGroceries(ids: ids) }
         }
     }
 
@@ -283,8 +283,32 @@ struct FoodTabView: View {
         let trimmed = editGroceryName.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         withAnimation {
-            item.name = trimmed
-            item.type = editGroceryType
+            write { try $0.editGrocery(id: item.id, name: trimmed, type: editGroceryType) }
+        }
+    }
+
+    /// Runs a mutation through the writer, or not at all.
+    ///
+    /// A failure to append leaves the tables exactly as they were — the writer
+    /// projects only what the log accepted — so the message is the whole of the
+    /// feedback: the row on screen is still the truth.
+    private func write(_ mutation: (FTWriter) throws -> Void) {
+        guard let writer else {
+            // No writer means no log (a preview). Showing the data without
+            // being able to record a change is better than changing a row the
+            // log will never mention.
+            return
+        }
+        do {
+            try mutation(writer)
+        } catch {
+            Logger(subsystem: FTSyncComposition.applicationIdentifier, category: "Sync")
+                .error("Could not record the change: \(String(describing: error))")
+            completionMessage = "Не удалось сохранить"
+            showCompletionNotification = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                showCompletionNotification = false
+            }
         }
     }
 

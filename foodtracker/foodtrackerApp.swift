@@ -6,28 +6,16 @@
 //
 
 import CoreSync
-import OSLog
 import SwiftUI
 import SwiftData
 
 @main
 struct foodtrackerApp: App {
-    /// The event log (F01.05). Nothing reads or writes it yet — the writers
-    /// arrive in F01.08–F01.10 — so a store that fails to open is logged rather
-    /// than fatal. When mutations actually route through it, that has to become
-    /// a hard failure: silently running without a log would mean accepting edits
-    /// nobody is recording.
-    let eventStore: SQLiteEventStore? = {
-        do {
-            return try FTSyncComposition.makeEventStore()
-        } catch {
-            Logger(subsystem: FTSyncComposition.applicationIdentifier, category: "Sync")
-                .error("Could not open the event store: \(String(describing: error))")
-            return nil
-        }
-    }()
+    let sharedModelContainer: ModelContainer
+    private let eventStore: SQLiteEventStore
+    private let writer: FTWriter
 
-    var sharedModelContainer: ModelContainer = {
+    init() {
         let schema = Schema([
             Item.self,
             FoodEntry.self,
@@ -39,20 +27,63 @@ struct foodtrackerApp: App {
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            sharedModelContainer = try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+
+        do {
+            // F01.05 left a store that would not open as a log line, because
+            // nothing wrote to it yet. From here on a grocery mutation is an
+            // event before it is a row: an app running without its log would
+            // accept edits nobody records, and the first replay would erase
+            // them. Refusing to start is the smaller loss, and it is what
+            // workhardercomrade does with the same failure.
+            eventStore = try FTSyncComposition.makeEventStore()
+        } catch {
+            fatalError("Could not open the event store: \(error)")
+        }
+
+        let context = sharedModelContainer.mainContext
+        writer = FTWriter(
+            modelContext: context,
+            store: eventStore,
+            projector: FTProjector(eventLog: eventStore, modelContext: context)
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(\.ftWriter, writer)
                 .onAppear {
                     let context = sharedModelContainer.mainContext
                     BackupService.shared.performAutoBackupIfNeeded(context: context)
                 }
         }
         .modelContainer(sharedModelContainer)
+    }
+}
+
+// MARK: - Injection
+
+/// The writer reaches the views through the environment rather than through
+/// initializers, so the view tree between the app and a tab stays untouched.
+///
+/// Optional on purpose: a SwiftUI preview builds a view without going through
+/// `foodtrackerApp`, and a preview that mutated a real log would be writing the
+/// developer's own events. A view with no writer shows data and refuses to
+/// change it.
+private struct FTWriterEnvironmentKey: EnvironmentKey {
+    static var defaultValue: FTWriter? { nil }
+}
+
+extension EnvironmentValues {
+    var ftWriter: FTWriter? {
+        get { self[FTWriterEnvironmentKey.self] }
+        set { self[FTWriterEnvironmentKey.self] = newValue }
     }
 }
