@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F01000010000000000000022 /* CoreSync in Frameworks */ = {isa = PBXBuildFile; productRef = F01000010000000000000021 /* CoreSync */; };
+		F01000010000000000000024 /* CoreSync in Frameworks */ = {isa = PBXBuildFile; productRef = F01000010000000000000023 /* CoreSync */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		F01000010000000000000010 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +44,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F01000010000000000000022 /* CoreSync in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -46,6 +52,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F01000010000000000000024 /* CoreSync in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +97,7 @@
 			);
 			name = foodtracker;
 			packageProductDependencies = (
+				F01000010000000000000021 /* CoreSync */,
 			);
 			productName = foodtracker;
 			productReference = BF3E03D22F1972E900370E5B /* foodtracker.app */;
@@ -113,6 +121,7 @@
 			);
 			name = foodtrackerTests;
 			packageProductDependencies = (
+				F01000010000000000000023 /* CoreSync */,
 			);
 			productName = foodtrackerTests;
 			productReference = F0100001000000000000000A /* foodtrackerTests.xctest */;
@@ -146,6 +155,9 @@
 			);
 			mainGroup = BF3E03C92F1972E900370E5B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F01000010000000000000020 /* XCLocalSwiftPackageReference "../super-app/Packages" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BF3E03D32F1972E900370E5B /* Products */;
 			projectDirPath = "";
@@ -466,6 +478,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F01000010000000000000020 /* XCLocalSwiftPackageReference "../super-app/Packages" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../super-app/Packages;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F01000010000000000000021 /* CoreSync */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreSync;
+		};
+		F01000010000000000000023 /* CoreSync */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreSync;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = BF3E03CA2F1972E900370E5B /* Project object */;
 }
