@@ -44,9 +44,9 @@ struct foodtrackerApp: App {
         // database. Failing to compose it (keychain trouble, usually) only
         // costs the network half: the bare store keeps the app fully
         // offline-functional, which is the failure mode F01.13 asks for.
-        if let bootstrap = FTSyncComposition.makeSyncBootstrap() {
+        let bootstrap = FTSyncComposition.makeSyncBootstrap()
+        if let bootstrap {
             eventStore = bootstrap.eventStore
-            syncCoordinator = FTSyncCoordinator(bootstrap: bootstrap)
         } else {
             do {
                 // F01.05 left a store that would not open as a log line, because
@@ -59,7 +59,6 @@ struct foodtrackerApp: App {
             } catch {
                 fatalError("Could not open the event store: \(error)")
             }
-            syncCoordinator = nil
         }
 
         let context = sharedModelContainer.mainContext
@@ -70,6 +69,22 @@ struct foodtrackerApp: App {
             store: eventStore,
             projector: projector
         )
+        // The projector serves both directions: the writer asks it to re-read
+        // what this device just appended, the pull handler asks it to re-read
+        // what another device sent (F01.14). One projector, so a row cannot be
+        // rebuilt two ways.
+        if let bootstrap {
+            syncCoordinator = FTSyncCoordinator(
+                bootstrap: bootstrap,
+                handler: FTRemoteEventHandler(
+                    eventLog: eventStore,
+                    projector: projector,
+                    notifications: FTFastingNotifications()
+                )
+            )
+        } else {
+            syncCoordinator = nil
+        }
         writer.onLocalEventAppended = { [syncCoordinator] in
             syncCoordinator?.noteLocalMutation()
         }

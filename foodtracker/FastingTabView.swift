@@ -8,12 +8,12 @@
 import OSLog
 import SwiftUI
 import SwiftData
-import UserNotifications
 
 struct FastingTabView: View {
     // No `modelContext`: the schedule and the debts change by being written to
     // the log first, and this view has no way left to touch a row directly.
     @Environment(\.ftWriter) private var writer
+    private let notifications = FTFastingNotifications()
     @Query private var entries: [FastingEntry]
     @Query(sort: \FastingDebt.createdAt, order: .reverse) private var debts: [FastingDebt]
 
@@ -198,7 +198,7 @@ struct FastingTabView: View {
                     )
                 }
                 guard recorded else { return }
-                scheduleStartNotification(hour: hour, minute: minute)
+                notifications.apply(.start(hour: hour, minute: minute))
             }
         }
     }
@@ -210,19 +210,20 @@ struct FastingTabView: View {
     // notifications stay here, next to the call that earned them, and are only
     // (re)scheduled once the change is actually in the log: reminding the user
     // about a fast that was never recorded would be a lie the log cannot back.
+    //
+    // What each button implies is stated as a plan (F01.14); the requests
+    // themselves live in `FTFastingNotifications`, which the pull path uses too.
 
     private func startFasting(entry: FastingEntry) {
         let recorded = withAnimation { write { try $0.startFast() } }
         guard recorded else { return }
-        cancelAllFastingNotifications()
-        scheduleEndNotification(after: entry.durationMinutes)
+        notifications.apply(.end(after: TimeInterval(entry.durationMinutes * 60)))
     }
 
     private func stopFasting(entry: FastingEntry) {
         let recorded = withAnimation { write { try $0.stopFast() } }
         guard recorded else { return }
-        cancelAllFastingNotifications()
-        scheduleStartNotification(hour: entry.startHour, minute: entry.startMinute)
+        notifications.apply(.start(hour: entry.startHour, minute: entry.startMinute))
     }
 
     private func iAte(entry: FastingEntry) {
@@ -238,14 +239,13 @@ struct FastingTabView: View {
 
         let recorded = withAnimation { write { try $0.recordIAte(missedMinutes: missedMinutes) } }
         guard recorded else { return }
-        cancelAllFastingNotifications()
-        scheduleStartNotification(hour: entry.startHour, minute: entry.startMinute)
+        notifications.apply(.start(hour: entry.startHour, minute: entry.startMinute))
     }
 
     private func deleteSchedule() {
         let recorded = withAnimation { write { try $0.deleteFastingSchedule() } }
         guard recorded else { return }
-        cancelAllFastingNotifications()
+        notifications.apply(.none)
     }
 
     /// Runs a mutation through the writer and says whether it happened.
@@ -265,8 +265,7 @@ struct FastingTabView: View {
             try mutation(writer)
             return true
         } catch {
-            Logger(subsystem: FTSyncComposition.applicationIdentifier, category: "Sync")
-                .error("Could not record the change: \(String(describing: error))")
+            Logger.ftSync.error("Could not record the change: \(String(describing: error))")
             showWriteFailure()
             return false
         }
@@ -277,50 +276,6 @@ struct FastingTabView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             writeFailure = nil
         }
-    }
-
-    // MARK: - Notifications
-
-    private func scheduleStartNotification(hour: Int, minute: Int) {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            guard granted else { return }
-
-            let content = UNMutableNotificationContent()
-            content.title = "Time to fast"
-            content.body = "Open the app and tap Start to begin your fast."
-            content.sound = .default
-
-            var dateComponents = DateComponents()
-            dateComponents.hour = hour
-            dateComponents.minute = minute
-            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-
-            let request = UNNotificationRequest(identifier: "fasting.start", content: content, trigger: trigger)
-            center.add(request)
-        }
-    }
-
-    private func scheduleEndNotification(after durationMinutes: Int) {
-        let center = UNUserNotificationCenter.current()
-
-        let content = UNMutableNotificationContent()
-        content.title = "Fasting complete!"
-        content.body = "You did it! Open the app and tap Stop."
-        content.sound = .default
-
-        let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: TimeInterval(durationMinutes * 60),
-            repeats: false
-        )
-
-        let request = UNNotificationRequest(identifier: "fasting.end", content: content, trigger: trigger)
-        center.add(request)
-    }
-
-    private func cancelAllFastingNotifications() {
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: ["fasting.start", "fasting.end"])
     }
 
     // MARK: - Formatting
