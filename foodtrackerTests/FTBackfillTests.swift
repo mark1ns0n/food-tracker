@@ -317,4 +317,110 @@ struct FTBackfillTests {
         #expect(try fixture.store.eventCount() == 0)
         #expect(fixture.service.isDone)
     }
+
+    // MARK: Rows the lightweight migration handed the same id
+
+    /// Every test above builds its rows by calling the model initializers, and
+    /// each call draws its own `UUID()` — which is the one shape the real
+    /// upgrade never produces. SwiftData evaluates the `id: UUID = UUID()`
+    /// default **once** when it adds the column, so a store carried over from
+    /// before F01.02 arrives with one id per *table*. That is what the owner's
+    /// phone did on 2026-08-11, and it took the backfill down.
+    private func seedStoreAsTheMigrationLeavesIt(_ fixture: Fixture) throws {
+        let groceryID = UUID()
+        for name in ["Rice", "Chicken", "Salad"] {
+            let row = Item(name: name, status: .available, type: .side)
+            row.id = groceryID
+            fixture.context.insert(row)
+        }
+        let deliveryID = UUID()
+        for name in ["Talabat", "Deliveroo"] {
+            let row = FoodEntry(name: name, amount: 10, createdAt: noon)
+            row.id = deliveryID
+            fixture.context.insert(row)
+        }
+        try fixture.context.save()
+    }
+
+    /// The regression: without the repair this throws `eventIDConflict`, and if
+    /// the conflict were merely dodged the replay would keep one grocery and
+    /// delete the other two.
+    @Test
+    func rowsTheMigrationGaveOneSharedIDStillBecomeOneEntityEach() throws {
+        let fixture = try Fixture()
+        try seedStoreAsTheMigrationLeavesIt(fixture)
+        let before = try fixture.snapshot()
+
+        try fixture.service.runIfNeeded()
+
+        #expect(try fixture.store.eventCount() == 5)
+        #expect(try fixture.snapshot() == before)
+
+        let groceries = try fixture.context.fetch(FetchDescriptor<Item>())
+        #expect(groceries.count == 3)
+        #expect(Set(groceries.map(\.id)).count == 3)
+    }
+
+    /// The repair must not reach across tables either: `backfillEventID` hashes
+    /// the entity id alone, so a grocery and a delivery holding the same
+    /// migration default would produce the same event id.
+    @Test
+    func aGroceryAndADeliveryHandedTheSameIDDoNotShareAnEventID() throws {
+        let fixture = try Fixture()
+        let shared = UUID()
+        let grocery = Item(name: "Rice", status: .available, type: .side)
+        grocery.id = shared
+        fixture.context.insert(grocery)
+        let delivery = FoodEntry(name: "Talabat", amount: 10, createdAt: noon)
+        delivery.id = shared
+        fixture.context.insert(delivery)
+        try fixture.context.save()
+
+        try fixture.service.runIfNeeded()
+
+        #expect(try fixture.store.eventCount() == 2)
+        #expect(grocery.id != delivery.id)
+    }
+
+    @Test
+    func asecondRunLeavesTheRepairedIdentitiesWhereTheyAre() throws {
+        let fixture = try Fixture()
+        try seedStoreAsTheMigrationLeavesIt(fixture)
+        try fixture.service.runIfNeeded()
+        let ids = try fixture.context.fetch(FetchDescriptor<Item>()).map(\.id).sorted {
+            $0.uuidString < $1.uuidString
+        }
+
+        try fixture.service.runIfNeeded()
+
+        let after = try fixture.context.fetch(FetchDescriptor<Item>()).map(\.id).sorted {
+            $0.uuidString < $1.uuidString
+        }
+        #expect(after == ids)
+    }
+
+    /// Once the log names row ids, reassigning them would orphan the events and
+    /// let the replay delete the rows they describe. Refusing is the outcome to
+    /// want, so the duplicates must survive untouched and the append must fail.
+    @Test
+    func aLogThatAlreadyHasEventsIsRefusedRatherThanReidentified() throws {
+        let fixture = try Fixture()
+        _ = try fixture.writer.addGrocery(name: "Written first", type: .main)
+        #expect(try fixture.store.eventCount() == 1)
+
+        let shared = UUID()
+        let rows = ["Rice", "Chicken"].map { name -> Item in
+            let row = Item(name: name, status: .available, type: .side)
+            row.id = shared
+            fixture.context.insert(row)
+            return row
+        }
+        try fixture.context.save()
+
+        #expect(throws: (any Error).self) {
+            try fixture.service.runIfNeeded()
+        }
+        #expect(rows.allSatisfy { $0.id == shared })
+        #expect(!fixture.service.isDone)
+    }
 }

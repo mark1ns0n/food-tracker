@@ -23,9 +23,16 @@ enum GroceryType: String, Codable, CaseIterable, Identifiable {
 
 @Model
 final class Item {
-    /// Stable identity for sync (F01.02). Defaulted so SwiftData applies a
-    /// lightweight additive migration and existing rows get a fresh UUID on
-    /// first open; `ft.*` event IDs are derived from it in F01.06.
+    /// Stable identity for sync (F01.02); `ft.*` entity and event ids are
+    /// derived from it (F01.06).
+    ///
+    /// The default makes SwiftData's migration additive, but **not** per row:
+    /// it evaluates `UUID()` once and stamps that one value across the whole
+    /// column, so every row carried over from before F01.02 shares an id. The
+    /// owner's phone proved it on 2026-08-11. `FTBackfillService` hands out
+    /// distinct ids before it reads any of them — see
+    /// `makeRowIdentitiesDistinct()`, which is the only thing standing between
+    /// a legacy store and thirteen groceries collapsing into one entity.
     var id: UUID = UUID()
     var name: String
     var status: ItemStatus

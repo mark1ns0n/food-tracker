@@ -60,9 +60,75 @@ final class FTBackfillService {
 
     func runIfNeeded() throws {
         guard !isDone else { return }
+        try makeRowIdentitiesDistinct()
         try store.appendLocalEvents(drafts())
         try projector.replayAll()
         defaults.set(true, forKey: Self.doneKey)
+    }
+
+    /// Gives every row an identity of its own, before anything reads one.
+    ///
+    /// `id: UUID = UUID()` (F01.02) reads as "each row gets its own", and that
+    /// holds for rows this build inserts — but not for rows that were already
+    /// there. SwiftData's lightweight migration evaluates the default **once**
+    /// and stamps that one value across the whole column, so a store carried
+    /// over from before F01.02 arrives with every grocery sharing a single
+    /// UUID, every delivery sharing another, and so on per table.
+    ///
+    /// That is not cosmetic. For groceries, delivery, dine-in and debts the
+    /// entity id *is* `row.id`, so all thirteen groceries on the owner's phone
+    /// were one entity, and the closing `replayAll` — which deletes every row
+    /// and rebuilds from the log — would have kept one and dropped twelve.
+    /// What actually happened is that the store refused the batch with
+    /// `eventIDConflict`: two creates, one deterministic event id, different
+    /// content. That refusal is the design working (F01.11), not the bug. The
+    /// bug is here, and this repairs it rather than the symptom.
+    ///
+    /// Only while the log is empty, which is exactly when no event can name a
+    /// row id yet, so handing out new ones costs nothing. Reassigning after a
+    /// backfill that half-landed would be the opposite: the events already
+    /// written would name rows that no longer exist, and the replay would
+    /// delete the rows they describe. If the log is not empty and ids are still
+    /// duplicated, the append fails loudly — the outcome to want.
+    ///
+    /// One `seen` set across all six models rather than one per model. These
+    /// ids are migration defaults, not draws from a random source, and
+    /// `FTIDs.backfillEventID(entityID:)` does not mix the entity type into the
+    /// recipe — so two tables handed the same default would collide as surely
+    /// as two rows in one table.
+    private func makeRowIdentitiesDistinct() throws {
+        guard try store.eventCount() == 0 else { return }
+
+        var seen: Set<UUID> = []
+        var changed = false
+        if try claimIdentities(Item.self, \.id, &seen) { changed = true }
+        if try claimIdentities(FoodEntry.self, \.id, &seen) { changed = true }
+        if try claimIdentities(DineInEntry.self, \.id, &seen) { changed = true }
+        if try claimIdentities(SavedName.self, \.id, &seen) { changed = true }
+        if try claimIdentities(FastingEntry.self, \.id, &seen) { changed = true }
+        if try claimIdentities(FastingDebt.self, \.id, &seen) { changed = true }
+
+        guard changed else { return }
+        try modelContext.save()
+    }
+
+    /// The first row to claim an id keeps it; every later claimant draws a new
+    /// one. Reports whether anything moved, so an untouched store is not saved
+    /// for nothing — and so a second run, which finds no duplicates, is a no-op.
+    private func claimIdentities<Model: PersistentModel>(
+        _: Model.Type,
+        _ id: ReferenceWritableKeyPath<Model, UUID>,
+        _ seen: inout Set<UUID>
+    ) throws -> Bool {
+        var changed = false
+        for row in try modelContext.fetch(FetchDescriptor<Model>()) {
+            if seen.insert(row[keyPath: id]).inserted { continue }
+            var fresh = UUID()
+            while !seen.insert(fresh).inserted { fresh = UUID() }
+            row[keyPath: id] = fresh
+            changed = true
+        }
+        return changed
     }
 
     /// One `create` per existing row, each carrying the row whole — the same
