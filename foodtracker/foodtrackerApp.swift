@@ -17,6 +17,7 @@ struct foodtrackerApp: App {
     private let writer: FTWriter
     private let backfill: FTBackfillService
     private let syncCoordinator: FTSyncCoordinator?
+    private let syncController: FTSyncController
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -85,6 +86,11 @@ struct foodtrackerApp: App {
         } else {
             syncCoordinator = nil
         }
+        // The screen borrows the coordinator rather than composing a stack of
+        // its own: the store behind it is the one the writer and the projector
+        // already hold, and a second one would be a second connection to the
+        // same database (F01.13).
+        syncController = FTSyncController(coordinator: syncCoordinator)
         writer.onLocalEventAppended = { [syncCoordinator] in
             syncCoordinator?.noteLocalMutation()
         }
@@ -92,7 +98,7 @@ struct foodtrackerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(syncController: syncController)
                 .environment(\.ftWriter, writer)
                 .onAppear {
                     do {

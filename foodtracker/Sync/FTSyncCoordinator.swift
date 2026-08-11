@@ -4,6 +4,7 @@
 //
 //  F01.13 — when the log talks to the backend.
 //  F01.14 — and what happens to what it says back.
+//  F01.15 — plus the push the owner asks for by hand.
 //
 
 import AppShell
@@ -88,6 +89,35 @@ final class FTSyncCoordinator {
         }
     }
 
+    /// The owner pressed Synchronize on the sync screen. Same two conditions as
+    /// the automatic triggers — the backfill has spoken, and the router knows
+    /// where `ft.*` goes — because a manual push is not a different kind of
+    /// sync, only a differently timed one.
+    ///
+    /// `nil` is the gate refusing: there is nothing to report to the owner about
+    /// a run that never started. In practice it is unreachable, since the
+    /// backfill runs from `ContentView.onAppear` and a failure there is fatal;
+    /// it is here so the invariant does not depend on that staying true.
+    ///
+    /// The trigger value is not read by `SyncBootstrap` at all; `.foreground` is
+    /// the closest of the three in meaning — the owner is looking at the screen
+    /// and wants both directions to move.
+    func synchronizeNow() async -> SyncRunResult? {
+        guard backfillDone else { return nil }
+        await registration.value
+        return await bootstrap.synchronize(trigger: .foreground)
+    }
+
+    /// What the sync screen shows about the log. Narrow on purpose: the store
+    /// itself already belongs to the writer and the projector, and a third
+    /// holder of it would be a third thing that could write.
+    var logCounts: FTLogCounts {
+        FTLogCounts(
+            total: (try? bootstrap.eventStore.eventCount()) ?? 0,
+            pending: (try? bootstrap.eventStore.pendingEventCount()) ?? 0
+        )
+    }
+
     /// The first sync must come after the backfill (F01 header): a log pushed
     /// before it would hand the backend fresh events with no history behind
     /// them. The flag is read per trigger, not once, so the launch on which the
@@ -95,6 +125,12 @@ final class FTSyncCoordinator {
     private var backfillDone: Bool {
         defaults.bool(forKey: FTBackfillService.doneKey)
     }
+}
+
+/// How much of the log exists, and how much of it the backend has not seen.
+struct FTLogCounts: Equatable {
+    var total = 0
+    var pending = 0
 }
 
 // MARK: - Pull

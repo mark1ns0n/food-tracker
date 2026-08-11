@@ -5,10 +5,15 @@
 //  Created by Ivan Markin on 15.01.2026.
 //
 
+import Combine
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    /// `nil` in previews, and on a device whose sync stack would not compose
+    /// (F01.15). The tab is shown either way.
+    var syncController: FTSyncController?
+
     var body: some View {
         TabView {
             FoodTabView()
@@ -21,10 +26,27 @@ struct ContentView: View {
                     Label("Fasting", systemImage: "timer")
                 }
 
+            FTSyncView(controller: syncController)
+                .tabItem {
+                    Label("Sync", systemImage: "antenna.radiowaves.left.and.right")
+                }
+
             BackupView()
                 .tabItem {
                     Label("Backup", systemImage: "arrow.triangle.2.circlepath")
                 }
+        }
+        // The token client deletes the device key before posting this, from
+        // whichever background task hit the rejection — so the screen learns
+        // about it here rather than by asking. `receive(on:)` is not decoration:
+        // the post comes off whatever thread the refresh failed on, and the
+        // controller it ends up touching is main-actor state.
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .ftDeviceAuthorizationRevoked)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            syncController?.markRevoked()
         }
     }
 }
