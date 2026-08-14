@@ -6,6 +6,7 @@
 //
 
 import AppShell
+import CoreSync
 import SwiftUI
 
 /// The Sync tab. It exists so this app can become the *second* device on an
@@ -138,7 +139,9 @@ private struct FTSyncForm: View {
         case .waitingApproval: "Approve in the browser"
         case .binding: "Binding the key…"
         case .enrolled: "Connected"
-        case .revoked: "Access revoked"
+        case .revoked(.revokedByService): "Access revoked — enroll again"
+        case .revoked(.credentialExpired): "Access expired — enroll again"
+        case .revoked(.credentialUnusable): "Credential unusable — enroll again"
         case let .refreshError(failure): "Error: \(failure)"
         }
     }

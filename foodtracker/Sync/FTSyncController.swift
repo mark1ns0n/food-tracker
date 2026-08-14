@@ -104,10 +104,13 @@ final class FTSyncController: ObservableObject {
 
     /// The device key was rejected and deleted underneath us. Any enrollment
     /// still in flight is chasing a key that no longer exists.
+    ///
+    /// Re-reading the coordinator's state is how the recorded reason for the
+    /// loss reaches this screen; this method has no way of knowing it (B27).
     func markRevoked() {
         enrollmentTask?.cancel()
         enrollmentTask = nil
-        enrollment = .revoked
+        refreshEnrollment()
     }
 
     // MARK: - Sync
